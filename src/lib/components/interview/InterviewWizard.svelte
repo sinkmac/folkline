@@ -375,13 +375,6 @@
     margin-top: 0;
   }
 
-  .paper-shell {
-    border-radius: 1rem;
-    border: 1px solid rgba(15, 23, 42, 0.08);
-    padding: 1rem;
-    background: #fff;
-  }
-
   .capture-stack {
     display: grid;
     gap: 1rem;
@@ -427,16 +420,6 @@
     color: #0f172a;
     background: #fff;
     resize: vertical;
-  }
-
-  .paper-shell p {
-    margin: 0 0 0.8rem;
-    line-height: 1.6;
-    color: #334155;
-  }
-
-  .paper-shell p:last-child {
-    margin-bottom: 0;
   }
 
   .actions {
@@ -513,8 +496,7 @@
       display: none;
     }
 
-    .wizard-card,
-    .paper-shell {
+    .wizard-card {
       border: 0;
       padding: 0;
       background: transparent;
