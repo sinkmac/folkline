@@ -1,7 +1,9 @@
 import { config as loadEnv } from 'dotenv';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { generateInterviewGuide } from '../src/lib/server/anthropic';
 
-loadEnv({ path: new URL('../.env', import.meta.url).pathname });
+loadEnv({ path: new URL('../.env', import.meta.url).pathname, quiet: true });
 
 const cases = [
   {
@@ -45,18 +47,17 @@ const cases = [
   }
 ] as const;
 
+const outPath = resolve(process.cwd(), 'tmp-live-generation-results.jsonl');
+writeFileSync(outPath, '');
+
 for (const testCase of cases) {
+  let line = '';
   try {
     const result = await generateInterviewGuide(testCase.input);
-    console.log(JSON.stringify({
-      id: testCase.id,
-      repaired: result.repaired,
-      guide: result.guide
-    }));
+    line = JSON.stringify({ id: testCase.id, repaired: result.repaired, guide: result.guide });
   } catch (error) {
-    console.log(JSON.stringify({
-      id: testCase.id,
-      error: error instanceof Error ? error.message : String(error)
-    }));
+    line = JSON.stringify({ id: testCase.id, error: error instanceof Error ? error.message : String(error) });
   }
+  writeFileSync(outPath, readFileSync(outPath, 'utf8') + line + '\n');
+  console.log(line);
 }

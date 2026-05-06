@@ -3,7 +3,12 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { Anthropic } from '@anthropic-ai/sdk';
 import type { InterviewInput } from '$lib/schemas/interview-input';
-import { interviewGuideSchema, type InterviewGuide } from '$lib/schemas/guide-output';
+import {
+  interviewGuideSchema,
+  type GuideSection,
+  type InterviewGuide,
+  type QuestionItem
+} from '$lib/schemas/guide-output';
 
 type AnthropicTextBlock = { type: 'text'; text: string };
 
@@ -12,60 +17,78 @@ type GenerationResult = {
   repaired: boolean;
 };
 
+type SectionTemplate = {
+  id: string;
+  title: string;
+  intro: string;
+  questionCount: number;
+  followUpCount: number;
+};
+
+type ConstrainedGuideResponse = {
+  briefingNote: string;
+  openingLines: string[];
+  sensitivityNotes: string[];
+  sections: Array<{
+    id: string;
+    questions: string[];
+    followUps: string[];
+  }>;
+};
+
 const PROMPT_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  '../../../docs/prompts/question-generator-system-prompt.md'
+  '../../../docs/prompts/question-generator-constrained-system-prompt.md'
 );
 
 const loadSystemPrompt = () => readFileSync(PROMPT_PATH, 'utf8');
 
 const MODEL = 'claude-haiku-4-5-20251001';
 
-const userPrompt = (input: InterviewInput) => `Create a personalised interview guide for this user input.
-
-Interviewee name: ${input.intervieweeName}
-Interviewer name: ${input.interviewerName || 'Not provided'}
-Relationship: ${input.relationship}
-Origin: ${input.origin}
-Early-life era: ${input.earlyLifeEra}
-Known context: ${input.knownContext || 'None provided'}
-Themes: ${input.themes.length ? input.themes.join(', ') : 'No specific themes selected'}
-Interview date: ${input.interviewDate || 'Not provided'}
-
-Important restraint:
-- Do not convert background cues into asserted biography unless the detail is explicitly supplied.
-- If you are unsure whether a contextual detail is truly factual, phrase the question to invite confirmation.
-- Briefing and sensitivity notes should give handling guidance, not write the person's story for them.
-- Briefing note should focus on how to open, pace, and handle the conversation in the room.
-- Sensitivity notes should focus only on how to respond if a topic becomes uncertain, tender, or corrected.
-- Do not include historical or regional explanation in briefing or sensitivity notes.
-
-Return JSON only.`;
-
-const repairPrompt = (input: InterviewInput, invalidJson: string, issues: string[]) => `The previous output did not meet the contract.
-
-Issues to fix:
-${issues.map((issue) => `- ${issue}`).join('\n')}
-
-Original user input:
-${userPrompt(input)}
-
-Previous invalid JSON:
-${invalidJson}
-
-Return corrected JSON only.`;
-
-const extractText = (content: unknown): string => {
-  if (!Array.isArray(content)) {
-    return '';
+const baseSectionTemplates: SectionTemplate[] = [
+  {
+    id: 'childhood-and-place',
+    title: 'Childhood and place',
+    intro: 'Let\'s start with where you grew up and what the place felt like day to day.',
+    questionCount: 4,
+    followUpCount: 4
+  },
+  {
+    id: 'family-and-relationships',
+    title: 'Family and relationships',
+    intro: 'Now let\'s talk about the people around you and what family life was like.',
+    questionCount: 4,
+    followUpCount: 4
+  },
+  {
+    id: 'work-and-daily-life',
+    title: 'Work and daily life',
+    intro: 'I\'d like to hear about how you spent your days, and about any work that became part of your life.',
+    questionCount: 4,
+    followUpCount: 4
+  },
+  {
+    id: 'hard-times-and-major-events',
+    title: 'Hard times and major events',
+    intro: 'Every life has stretches that are harder or more uncertain. If any come to mind, we can talk about those gently.',
+    questionCount: 3,
+    followUpCount: 3
+  },
+  {
+    id: 'objects-photos-and-stories',
+    title: 'Objects, photos and remembered stories',
+    intro: 'Sometimes a photograph, keepsake, or family story unlocks detail that nothing else does.',
+    questionCount: 4,
+    followUpCount: 4
+  },
+  {
+    id: 'looking-back',
+    title: 'Looking back',
+    intro: 'As you look back now, I\'d like to hear what stands out and what still feels important.',
+    questionCount: 3,
+    followUpCount: 3
   }
-
-  return content
-    .filter((block): block is AnthropicTextBlock => Boolean(block) && typeof block === 'object' && (block as AnthropicTextBlock).type === 'text')
-    .map((block) => block.text)
-    .join('')
-    .trim();
-};
+];
 
 const questionStem = (value: string) =>
   value
@@ -84,7 +107,180 @@ const bannedPhrases = [
   'describe your socio-economic circumstances'
 ];
 
-export const validateGuideBusinessRules = (guide: InterviewGuide): string[] => {
+const normalizeSentence = (value: string): string => value.replace(/\s+/g, ' ').trim();
+
+const extractText = (content: unknown): string => {
+  if (!Array.isArray(content)) {
+    return '';
+  }
+
+  return content
+    .filter((block): block is AnthropicTextBlock => Boolean(block) && typeof block === 'object' && (block as AnthropicTextBlock).type === 'text')
+    .map((block) => block.text)
+    .join('')
+    .trim();
+};
+
+const buildSectionTemplates = (input: InterviewInput): SectionTemplate[] => {
+  const loweredThemes = input.themes.map((theme) => theme.toLowerCase());
+
+  return baseSectionTemplates.map((section) => {
+    if (section.id === 'work-and-daily-life' && loweredThemes.includes('beliefs')) {
+      return {
+        ...section,
+        title: 'Work, beliefs and daily life',
+        intro: 'I\'d like to hear about how you spent your days, any work that shaped your life, and whether belief or church was part of ordinary life around you.'
+      };
+    }
+
+    if (section.id === 'work-and-daily-life' && loweredThemes.includes('emigration')) {
+      return {
+        ...section,
+        title: 'Work, movement and daily life',
+        intro: 'I\'d like to hear about how you spent your days, any work that shaped your life, and whether moving away or staying put was part of family conversation.'
+      };
+    }
+
+    return section;
+  });
+};
+
+const buildUserPrompt = (input: InterviewInput, sections: SectionTemplate[]) => `Create the fillable parts of an interview guide using the fixed section structure below.
+
+Interviewee name: ${input.intervieweeName}
+Interviewer name: ${input.interviewerName || 'Not provided'}
+Relationship: ${input.relationship}
+Origin: ${input.origin}
+Early-life era: ${input.earlyLifeEra}
+Known context: ${input.knownContext || 'None provided'}
+Themes: ${input.themes.length ? input.themes.join(', ') : 'No specific themes selected'}
+Interview date: ${input.interviewDate || 'Not provided'}
+
+Fixed sections:
+${sections
+  .map(
+    (section) => `- id: ${section.id}\n  title: ${section.title}\n  intro: ${section.intro}\n  questions: exactly ${section.questionCount}\n  followUps: exactly ${section.followUpCount}`
+  )
+  .join('\n')}
+
+Return JSON only with this schema:
+{
+  "briefingNote": "string",
+  "openingLines": ["string"],
+  "sensitivityNotes": ["string"],
+  "sections": [
+    {
+      "id": "section-id",
+      "questions": ["question text"],
+      "followUps": ["follow-up text"]
+    }
+  ]
+}`;
+
+const normalizeBriefingNote = (): string =>
+  [
+    'Start with one specific place, routine, or object rather than a broad life-summary question.',
+    'Let the interviewee set the pace and stay with the detail that feels most alive to them.',
+    'If they correct something or take the story in a different direction, treat that as useful information.',
+    'Silence is fine. You do not need to fill every pause.',
+    'If photographs or objects come up, use them as gentle prompts rather than proof points.'
+  ].join(' ');
+
+const normalizeSensitivityNotes = (notes: string[]): string[] => {
+  const safeDefaults = [
+    'If something feels uncertain, ask gently and let them correct or reshape it.',
+    'If a topic feels tender, pause and follow their lead rather than pressing on.',
+    'If memory is vague on dates or order, stay with the detail they do remember.',
+    'If they seem tired or want to stop, that is the right moment to pause or finish.'
+  ];
+
+  return Array.from(new Set([...notes.map(normalizeSentence).filter(Boolean), ...safeDefaults])).slice(0, 5);
+};
+
+const normalizeQuestionText = (text: string): string => {
+  let result = normalizeSentence(text);
+
+  const rewrites: Array<[RegExp, string]> = [
+    [/^I think you (.+?)—is that right, and (.+)$/i, 'Was it right that you $1? And if so, $2'],
+    [/^I know there were (.+?)—tell me about that side of your life\.?$/i, 'Were there $1 at all, and if so what was that side of life like for you?'],
+    [/^Your father worked in (.+?)—what do you remember about that\??$/i, 'Was $1 part of family life at all when you were growing up?'],
+    [/^You grew up doing (.+?)\.?$/i, 'Was $1 part of everyday life for you when you were young?'],
+    [/^You mentioned (.+?)—do you have memories of (.+)$/i, 'If $1 was part of life then, do you have memories of $2']
+  ];
+
+  for (const [pattern, replacement] of rewrites) {
+    if (pattern.test(result)) {
+      result = result.replace(pattern, replacement);
+    }
+  }
+
+  return normalizeSentence(result);
+};
+
+const buildGuide = (response: ConstrainedGuideResponse, sections: SectionTemplate[]): InterviewGuide => ({
+  briefingNote: normalizeBriefingNote(),
+  openingLines: response.openingLines.map(normalizeSentence).filter(Boolean).slice(0, 3),
+  sensitivityNotes: normalizeSensitivityNotes(response.sensitivityNotes),
+  sections: sections.map((section) => {
+    const generated = response.sections.find((item) => item.id === section.id);
+    const questions = (generated?.questions ?? []).slice(0, section.questionCount).map((text, index) => ({
+      id: `q-${section.id}-${index + 1}`,
+      text: normalizeQuestionText(text)
+    }));
+    const followUps = (generated?.followUps ?? []).slice(0, section.followUpCount).map(normalizeSentence);
+
+    return {
+      id: section.id,
+      title: section.title,
+      intro: section.intro,
+      questions,
+      followUps
+    } satisfies GuideSection;
+  })
+});
+
+const parseResponse = (rawText: string, sections: SectionTemplate[]): { guide: InterviewGuide | null; issues: string[] } => {
+  try {
+    const normalized = rawText
+      .trim()
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/```$/i, '')
+      .trim();
+
+    const parsed = JSON.parse(normalized) as ConstrainedGuideResponse;
+    const guide = interviewGuideSchema.parse(buildGuide(parsed, sections));
+    const issues = validateGuideBusinessRules(guide, sections);
+    return { guide: issues.length ? null : guide, issues };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Invalid JSON response';
+    return { guide: null, issues: [message] };
+  }
+};
+
+const makeClient = () => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  if (!apiKey) {
+    throw new Error('ANTHROPIC_API_KEY is not configured.');
+  }
+
+  return new Anthropic({ apiKey });
+};
+
+const requestGuide = async (client: Anthropic, prompt: string) => {
+  const response = await client.messages.create({
+    model: MODEL,
+    max_tokens: 4000,
+    temperature: 0.5,
+    system: loadSystemPrompt(),
+    messages: [{ role: 'user', content: prompt }]
+  });
+
+  return extractText(response.content);
+};
+
+export const validateGuideBusinessRules = (guide: InterviewGuide, sections: SectionTemplate[]): string[] => {
   const issues: string[] = [];
   const totalQuestions = guide.sections.reduce((sum, section) => sum + section.questions.length, 0);
 
@@ -99,12 +295,18 @@ export const validateGuideBusinessRules = (guide: InterviewGuide): string[] => {
   const stems = new Set<string>();
 
   for (const section of guide.sections) {
-    if (section.questions.length < 3 || section.questions.length > 6) {
-      issues.push(`Section "${section.title}" must have 3 to 6 questions.`);
+    const template = sections.find((item) => item.id === section.id);
+    if (!template) {
+      issues.push(`Unexpected section id: ${section.id}`);
+      continue;
     }
 
-    if (section.followUps.length < 3 || section.followUps.length > 5) {
-      issues.push(`Section "${section.title}" must have 3 to 5 follow-up prompts.`);
+    if (section.questions.length !== template.questionCount) {
+      issues.push(`Section "${section.title}" must have exactly ${template.questionCount} questions.`);
+    }
+
+    if (section.followUps.length !== template.followUpCount) {
+      issues.push(`Section "${section.title}" must have exactly ${template.followUpCount} follow-up prompts.`);
     }
 
     for (const question of section.questions) {
@@ -142,58 +344,22 @@ export const validateGuideBusinessRules = (guide: InterviewGuide): string[] => {
   return issues;
 };
 
-const parseGuide = (rawText: string): { guide: InterviewGuide | null; issues: string[] } => {
-  try {
-    const normalized = rawText
-      .trim()
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/```$/i, '')
-      .trim();
-    const parsed = JSON.parse(normalized);
-    const guide = interviewGuideSchema.parse(parsed);
-    const issues = validateGuideBusinessRules(guide);
-    return { guide: issues.length ? null : guide, issues };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Invalid JSON response';
-    return { guide: null, issues: [message] };
-  }
-};
-
-const makeClient = () => {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-
-  if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY is not configured.');
-  }
-
-  return new Anthropic({ apiKey });
-};
-
-const requestGuide = async (client: Anthropic, prompt: string) => {
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 4000,
-    temperature: 0.7,
-    system: loadSystemPrompt(),
-    messages: [{ role: 'user', content: prompt }]
-  });
-
-  return extractText(response.content);
-};
-
 export const generateInterviewGuide = async (input: InterviewInput): Promise<GenerationResult> => {
   const client = makeClient();
+  const sections = buildSectionTemplates(input);
 
-  const firstResponse = await requestGuide(client, userPrompt(input));
-  const firstPass = parseGuide(firstResponse);
+  const firstResponse = await requestGuide(client, buildUserPrompt(input, sections));
+  const firstPass = parseResponse(firstResponse, sections);
 
   if (firstPass.guide) {
     return { guide: firstPass.guide, repaired: false };
   }
 
-  const secondResponse = await requestGuide(client, repairPrompt(input, firstResponse, firstPass.issues));
-  const secondPass = parseGuide(secondResponse);
+  const secondResponse = await requestGuide(
+    client,
+    `${buildUserPrompt(input, sections)}\n\nThe previous response failed for these reasons:\n${firstPass.issues.map((issue) => `- ${issue}`).join('\n')}\n\nReturn corrected JSON only.`
+  );
+  const secondPass = parseResponse(secondResponse, sections);
 
   if (!secondPass.guide) {
     throw new Error(secondPass.issues.join(' | '));
