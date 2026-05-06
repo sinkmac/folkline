@@ -32,6 +32,11 @@ Known context: ${input.knownContext || 'None provided'}
 Themes: ${input.themes.length ? input.themes.join(', ') : 'No specific themes selected'}
 Interview date: ${input.interviewDate || 'Not provided'}
 
+Important restraint:
+- Do not convert background cues into asserted biography unless the detail is explicitly supplied.
+- If you are unsure whether a contextual detail is truly factual, phrase the question to invite confirmation.
+- Briefing and sensitivity notes should give handling guidance, not write the person's story for them.
+
 Return JSON only.`;
 
 const repairPrompt = (input: InterviewInput, invalidJson: string, issues: string[]) => `The previous output did not meet the contract.
