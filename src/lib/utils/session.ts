@@ -71,6 +71,10 @@ export const countAnsweredQuestions = (session: InterviewSession): number => {
   return Object.values(session.capture.notesByQuestionId).filter((value) => value.trim().length > 0).length;
 };
 
+export const countTotalQuestions = (session: InterviewSession): number => {
+  return session.guide?.sections.reduce((sum, section) => sum + section.questions.length, 0) ?? 0;
+};
+
 export const hasAnyCapturedNotes = (session: InterviewSession): boolean => {
   return countAnsweredQuestions(session) > 0 || session.capture.freeNotes.trim().length > 0;
 };

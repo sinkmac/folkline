@@ -1,12 +1,22 @@
 <script lang="ts">
   import { browser } from '$app/environment';
   import ConductView from '$lib/components/interview/ConductView.svelte';
+  import CaptureProgress from '$lib/components/interview/CaptureProgress.svelte';
+  import CaptureQuestionField from '$lib/components/interview/CaptureQuestionField.svelte';
   import ErrorBanner from '$lib/components/interview/ErrorBanner.svelte';
   import PrepareForm from '$lib/components/interview/PrepareForm.svelte';
   import ResetSessionModal from '$lib/components/interview/ResetSessionModal.svelte';
+  import SaveStatus from '$lib/components/interview/SaveStatus.svelte';
   import Stepper from '$lib/components/interview/Stepper.svelte';
   import { clearSession, loadSession, saveSession, safeStorageAvailable } from '$lib/utils/local-storage';
-  import { createEmptySession, hasAnyCapturedNotes, touchSession, type InterviewSession } from '$lib/utils/session';
+  import {
+    countAnsweredQuestions,
+    countTotalQuestions,
+    createEmptySession,
+    hasAnyCapturedNotes,
+    touchSession,
+    type InterviewSession
+  } from '$lib/utils/session';
   import { APP_SUBHEAD, INTERVIEW_STEP_ORDER, type InterviewStep } from '$lib/utils/constants';
   import type { InterviewInput } from '$lib/schemas/interview-input';
 
@@ -26,6 +36,7 @@
   let loadingGuide = $state(false);
   let generateError = $state('');
   let generationMeta = $state<{ repaired: boolean } | null>(null);
+  let autosaveTimer = $state<ReturnType<typeof setTimeout> | null>(null);
 
   const persistSession = () => {
     if (!browser || !hydrationComplete) {
@@ -33,6 +44,52 @@
     }
 
     saveSession(session);
+  };
+
+  const scheduleAutosave = () => {
+    if (!browser) {
+      return;
+    }
+
+    if (autosaveTimer) {
+      clearTimeout(autosaveTimer);
+    }
+
+    autosaveTimer = setTimeout(() => {
+      session = touchSession({
+        ...session,
+        capture: {
+          ...session.capture,
+          lastSavedAt: new Date().toISOString()
+        }
+      });
+      persistSession();
+    }, 500);
+  };
+
+  const updateQuestionNote = (questionId: string, value: string) => {
+    session = {
+      ...session,
+      capture: {
+        ...session.capture,
+        notesByQuestionId: {
+          ...session.capture.notesByQuestionId,
+          [questionId]: value
+        }
+      }
+    };
+    scheduleAutosave();
+  };
+
+  const updateFreeNotes = (value: string) => {
+    session = {
+      ...session,
+      capture: {
+        ...session.capture,
+        freeNotes: value
+      }
+    };
+    scheduleAutosave();
   };
 
   const setStep = (step: InterviewStep) => {
@@ -177,15 +234,53 @@
     </div>
   {:else if session.currentStep === 'capture'}
     <h2>Capture</h2>
-    <p>The capture form arrives in Phase 4. This shell preserves the step boundary and local-save expectations.</p>
-    <div class="paper-shell">
-      <p><strong>Autosave target:</strong> localStorage</p>
-      <p><strong>Progress indicator:</strong> ready for Phase 4 wiring</p>
-      <p><strong>Free notes:</strong> reserved for anything the guide did not cover</p>
-    </div>
+    {#if session.guide}
+      <p>Use this space for key points, names, places, incidents, phrases, and anything worth keeping. This is for notes, not a word-for-word transcript.</p>
+      <CaptureProgress
+        totalQuestions={countTotalQuestions(session)}
+        answeredQuestions={countAnsweredQuestions(session)}
+      />
+      <SaveStatus lastSavedAt={session.capture.lastSavedAt} {storageReady} />
+      <div class="capture-stack">
+        {#each session.guide.sections as section}
+          <section class="capture-section">
+            <div class="capture-heading">
+              <p class="capture-kicker">{section.title}</p>
+              <h3>{section.intro}</h3>
+            </div>
+            <div class="capture-fields">
+              {#each section.questions as question}
+                <CaptureQuestionField
+                  questionId={question.id}
+                  questionText={question.text}
+                  value={session.capture.notesByQuestionId[question.id] ?? ''}
+                  onInput={updateQuestionNote}
+                />
+              {/each}
+            </div>
+          </section>
+        {/each}
+
+        <section class="capture-section">
+          <div class="capture-heading">
+            <p class="capture-kicker">Anything else</p>
+            <h3>Free notes</h3>
+          </div>
+          <textarea
+            class="free-notes"
+            rows="8"
+            placeholder="Add anything that did not fit the questions — names, family disputes, directions, objects, stories you want to keep separately."
+            value={session.capture.freeNotes}
+            oninput={(event) => updateFreeNotes((event.currentTarget as HTMLTextAreaElement).value)}
+          ></textarea>
+        </section>
+      </div>
+    {:else}
+      <p>No guide generated yet. Go back and prepare the interview first.</p>
+    {/if}
     <div class="actions">
       <button type="button" class="secondary" onclick={() => setStep('conduct')}>Back</button>
-      <button type="button" class="primary" onclick={() => setStep('receive')}>Continue</button>
+      <button type="button" class="primary" onclick={() => setStep('receive')} disabled={!session.guide}>Continue</button>
     </div>
   {:else}
     <h2>Receive</h2>
@@ -287,6 +382,53 @@
     border: 1px solid rgba(15, 23, 42, 0.08);
     padding: 1rem;
     background: #fff;
+  }
+
+  .capture-stack {
+    display: grid;
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
+  .capture-section {
+    display: grid;
+    gap: 1rem;
+    padding: 1rem;
+    border-radius: 1rem;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: #fff;
+  }
+
+  .capture-heading {
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  }
+
+  .capture-kicker {
+    margin: 0 0 0.25rem;
+    color: #166534;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .capture-fields {
+    display: grid;
+    gap: 0.85rem;
+  }
+
+  .free-notes {
+    width: 100%;
+    min-height: 10rem;
+    border: 1px solid rgba(15, 23, 42, 0.14);
+    border-radius: 0.9rem;
+    padding: 0.95rem 1rem;
+    font: inherit;
+    line-height: 1.6;
+    color: #0f172a;
+    background: #fff;
+    resize: vertical;
   }
 
   .paper-shell p {
