@@ -1,2 +1,15 @@
-<h1>Welcome to SvelteKit</h1>
-<p>Visit <a href="https://svelte.dev/docs/kit">svelte.dev/docs/kit</a> to read the documentation</p>
+<script lang="ts">
+  import Hero from '$lib/components/marketing/Hero.svelte';
+  import TrustStrip from '$lib/components/marketing/TrustStrip.svelte';
+</script>
+
+<svelte:head>
+  <title>Folkline</title>
+  <meta
+    name="description"
+    content="A free tool to help you prepare for — and capture — a conversation with someone whose memories matter."
+  />
+</svelte:head>
+
+<Hero />
+<TrustStrip />
