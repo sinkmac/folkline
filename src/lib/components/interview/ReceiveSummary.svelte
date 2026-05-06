@@ -1,8 +1,16 @@
 <script lang="ts">
+  import EmailSendForm from '$lib/components/interview/EmailSendForm.svelte';
   import type { SummaryDocument } from '$lib/schemas/summary';
   import { printGuide } from '$lib/utils/print';
 
-  let { summary, hasContent } = $props<{ summary: SummaryDocument; hasContent: boolean }>();
+  let { summary, hasContent, emailLoading, emailSuccess, emailError, onSendEmail } = $props<{
+    summary: SummaryDocument;
+    hasContent: boolean;
+    emailLoading: boolean;
+    emailSuccess: string;
+    emailError: string;
+    onSendEmail: (email: string) => void;
+  }>();
 </script>
 
 <section class="receive-view">
@@ -49,6 +57,22 @@
             <p>{summary.freeNotes}</p>
           </section>
         {/if}
+
+        <section class="summary-section no-print">
+          <h3>Email delivery</h3>
+          <p class="email-note">Send yourself a copy of these notes. No marketing follow-up. One email, once.</p>
+          <EmailSendForm
+            loading={emailLoading}
+            disabled={!hasContent}
+            onSubmit={onSendEmail}
+          />
+          {#if emailSuccess}
+            <p class="email-success">{emailSuccess}</p>
+          {/if}
+          {#if emailError}
+            <p class="email-error">{emailError}</p>
+          {/if}
+        </section>
       </div>
     {:else}
       <section class="empty-state">
@@ -177,6 +201,20 @@
 
   .summary-section p {
     margin: 0.75rem 0 0;
+  }
+
+  .email-note,
+  .email-success,
+  .email-error {
+    margin-top: 0.85rem;
+  }
+
+  .email-success {
+    color: #166534;
+  }
+
+  .email-error {
+    color: #991b1b;
   }
 
   .empty-state {

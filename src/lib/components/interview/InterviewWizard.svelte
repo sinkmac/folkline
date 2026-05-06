@@ -39,6 +39,9 @@
   let generateError = $state('');
   let generationMeta = $state<{ repaired: boolean } | null>(null);
   let autosaveTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+  let emailLoading = $state(false);
+  let emailSuccess = $state('');
+  let emailError = $state('');
   const summary = $derived(buildSummaryDocument(session));
   const summaryHasContent = $derived(summary.sections.length > 0 || Boolean(summary.freeNotes?.trim()));
 
@@ -94,6 +97,32 @@
       }
     };
     scheduleAutosave();
+  };
+
+  const sendEmail = async (email: string) => {
+    emailLoading = true;
+    emailSuccess = '';
+    emailError = '';
+
+    try {
+      const response = await fetch('/api/send-summary', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, summary, honeypot: '' })
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload?.error?.message || 'Email send failed.');
+      }
+
+      emailSuccess = `Summary sent to ${email}.`;
+    } catch (error) {
+      emailError = error instanceof Error ? error.message : 'Email send failed.';
+    } finally {
+      emailLoading = false;
+    }
   };
 
   const setStep = (step: InterviewStep) => {
@@ -287,7 +316,14 @@
       <button type="button" class="primary" onclick={() => setStep('receive')} disabled={!session.guide}>Continue</button>
     </div>
   {:else}
-    <ReceiveSummary summary={summary} hasContent={summaryHasContent} />
+    <ReceiveSummary
+      summary={summary}
+      hasContent={summaryHasContent}
+      emailLoading={emailLoading}
+      emailSuccess={emailSuccess}
+      emailError={emailError}
+      onSendEmail={sendEmail}
+    />
     <div class="actions no-print">
       <button type="button" class="secondary" onclick={() => setStep('capture')}>Back</button>
       <button type="button" class="danger" onclick={() => (showResetModal = true)}>Reset session</button>
