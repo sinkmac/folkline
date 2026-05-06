@@ -36,6 +36,9 @@ Important restraint:
 - Do not convert background cues into asserted biography unless the detail is explicitly supplied.
 - If you are unsure whether a contextual detail is truly factual, phrase the question to invite confirmation.
 - Briefing and sensitivity notes should give handling guidance, not write the person's story for them.
+- Briefing note should focus on how to open, pace, and handle the conversation in the room.
+- Sensitivity notes should focus only on how to respond if a topic becomes uncertain, tender, or corrected.
+- Do not include historical or regional explanation in briefing or sensitivity notes.
 
 Return JSON only.`;
 

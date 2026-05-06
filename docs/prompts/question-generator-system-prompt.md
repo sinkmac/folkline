@@ -74,4 +74,10 @@ Required output schema:
   ]
 }
 
-Make the result feel trustworthy enough to hand to a family member.
+Special rules for framing fields:
+- briefingNote must be practical room guidance only.
+- briefingNote must not summarise the interviewee's biography back to the user.
+- sensitivityNotes must be interview-handling notes only.
+- sensitivityNotes must not contain historical exposition, sociological framing, or regional generalisations.
+- Do not restate the user's contextual inputs as if they were settled narrative truth.
+- Opening lines may be warm and specific, but must not imply facts the interviewee has not confirmed.
