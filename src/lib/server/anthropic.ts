@@ -186,15 +186,38 @@ const normalizeBriefingNote = (): string =>
     'If photographs or objects come up, use them as gentle prompts rather than proof points.'
   ].join(' ');
 
-const normalizeSensitivityNotes = (notes: string[]): string[] => {
-  const safeDefaults = [
+const buildSensitivityNotes = (input: InterviewInput): string[] => {
+  const notes = [
     'If something feels uncertain, ask gently and let them correct or reshape it.',
     'If a topic feels tender, pause and follow their lead rather than pressing on.',
     'If memory is vague on dates or order, stay with the detail they do remember.',
     'If they seem tired or want to stop, that is the right moment to pause or finish.'
   ];
 
-  return Array.from(new Set([...notes.map(normalizeSentence).filter(Boolean), ...safeDefaults])).slice(0, 5);
+  const lowerContext = input.knownContext.toLowerCase();
+  const lowerThemes = input.themes.map((theme) => theme.toLowerCase());
+
+  if (lowerThemes.includes('objects and photographs') || /photo|photograph|object|tool|letter|keepsake/.test(lowerContext)) {
+    notes.push('If photographs or objects appear, use them as gentle prompts rather than testing memory against them.');
+  }
+
+  if (lowerThemes.includes('war') || /war|ration/.test(lowerContext)) {
+    notes.push('If wartime or shortage memories come up, let them describe what felt ordinary or difficult in their own terms.');
+  }
+
+  if (lowerThemes.includes('emigration') || /emigration|england|america|leave|left/.test(lowerContext)) {
+    notes.push('If leaving, staying, or separation comes up, do not assume whether it felt hopeful, painful, or simply practical.');
+  }
+
+  if (lowerThemes.includes('beliefs') || /church|faith|belief/.test(lowerContext)) {
+    notes.push('If belief or church was part of life, let them describe it in their own language without treating it as unusual.');
+  }
+
+  if (/illness|bereave|death|died|loss|estrang|adopt/.test(lowerContext)) {
+    notes.push('If illness, loss, or strained family history comes up, acknowledge it simply and let them decide how far to go.');
+  }
+
+  return notes.slice(0, 5);
 };
 
 const normalizeQuestionText = (text: string): string => {
@@ -217,10 +240,10 @@ const normalizeQuestionText = (text: string): string => {
   return normalizeSentence(result);
 };
 
-const buildGuide = (response: ConstrainedGuideResponse, sections: SectionTemplate[]): InterviewGuide => ({
+const buildGuide = (response: ConstrainedGuideResponse, sections: SectionTemplate[], input: InterviewInput): InterviewGuide => ({
   briefingNote: normalizeBriefingNote(),
   openingLines: response.openingLines.map(normalizeSentence).filter(Boolean).slice(0, 3),
-  sensitivityNotes: normalizeSensitivityNotes(response.sensitivityNotes),
+  sensitivityNotes: buildSensitivityNotes(input),
   sections: sections.map((section) => {
     const generated = response.sections.find((item) => item.id === section.id);
     const questions = (generated?.questions ?? []).slice(0, section.questionCount).map((text, index) => ({
@@ -239,7 +262,7 @@ const buildGuide = (response: ConstrainedGuideResponse, sections: SectionTemplat
   })
 });
 
-const parseResponse = (rawText: string, sections: SectionTemplate[]): { guide: InterviewGuide | null; issues: string[] } => {
+const parseResponse = (rawText: string, sections: SectionTemplate[], input: InterviewInput): { guide: InterviewGuide | null; issues: string[] } => {
   try {
     const normalized = rawText
       .trim()
@@ -249,7 +272,7 @@ const parseResponse = (rawText: string, sections: SectionTemplate[]): { guide: I
       .trim();
 
     const parsed = JSON.parse(normalized) as ConstrainedGuideResponse;
-    const guide = interviewGuideSchema.parse(buildGuide(parsed, sections));
+    const guide = interviewGuideSchema.parse(buildGuide(parsed, sections, input));
     const issues = validateGuideBusinessRules(guide, sections);
     return { guide: issues.length ? null : guide, issues };
   } catch (error) {
@@ -349,7 +372,7 @@ export const generateInterviewGuide = async (input: InterviewInput): Promise<Gen
   const sections = buildSectionTemplates(input);
 
   const firstResponse = await requestGuide(client, buildUserPrompt(input, sections));
-  const firstPass = parseResponse(firstResponse, sections);
+  const firstPass = parseResponse(firstResponse, sections, input);
 
   if (firstPass.guide) {
     return { guide: firstPass.guide, repaired: false };
@@ -359,7 +382,7 @@ export const generateInterviewGuide = async (input: InterviewInput): Promise<Gen
     client,
     `${buildUserPrompt(input, sections)}\n\nThe previous response failed for these reasons:\n${firstPass.issues.map((issue) => `- ${issue}`).join('\n')}\n\nReturn corrected JSON only.`
   );
-  const secondPass = parseResponse(secondResponse, sections);
+  const secondPass = parseResponse(secondResponse, sections, input);
 
   if (!secondPass.guide) {
     throw new Error(secondPass.issues.join(' | '));
