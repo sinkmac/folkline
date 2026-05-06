@@ -282,12 +282,6 @@
     margin-top: 0;
   }
 
-  .guide-stack {
-    display: grid;
-    gap: 1rem;
-    margin-top: 1rem;
-  }
-
   .paper-shell {
     border-radius: 1rem;
     border: 1px solid rgba(15, 23, 42, 0.08);
