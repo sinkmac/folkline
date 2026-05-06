@@ -36,10 +36,7 @@ type ConstrainedGuideResponse = {
   }>;
 };
 
-const PROMPT_PATH = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  '../../../docs/prompts/question-generator-constrained-system-prompt.md'
-);
+const PROMPT_PATH = resolve(process.cwd(), 'docs/prompts/question-generator-constrained-system-prompt.md');
 
 const loadSystemPrompt = () => readFileSync(PROMPT_PATH, 'utf8');
 
