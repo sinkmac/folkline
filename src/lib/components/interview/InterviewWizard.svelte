@@ -1,8 +1,7 @@
 <script lang="ts">
   import { browser } from '$app/environment';
-  import BriefingCard from '$lib/components/interview/BriefingCard.svelte';
+  import ConductView from '$lib/components/interview/ConductView.svelte';
   import ErrorBanner from '$lib/components/interview/ErrorBanner.svelte';
-  import GuideSection from '$lib/components/interview/GuideSection.svelte';
   import PrepareForm from '$lib/components/interview/PrepareForm.svelte';
   import ResetSessionModal from '$lib/components/interview/ResetSessionModal.svelte';
   import Stepper from '$lib/components/interview/Stepper.svelte';
@@ -163,21 +162,16 @@
       onSubmit={submitPrepare}
     />
   {:else if session.currentStep === 'conduct'}
-    <h2>Conduct</h2>
     {#if session.guide}
       {#if generationMeta?.repaired}
         <p class="status-note">This guide passed through one repair check before it was accepted.</p>
       {/if}
-      <BriefingCard guide={session.guide} />
-      <div class="guide-stack">
-        {#each session.guide.sections as section}
-          <GuideSection {section} />
-        {/each}
-      </div>
+      <ConductView guide={session.guide} />
     {:else}
+      <h2>Conduct</h2>
       <p>No guide generated yet. Go back and prepare the interview first.</p>
     {/if}
-    <div class="actions">
+    <div class="actions no-print">
       <button type="button" class="secondary" onclick={() => setStep('prepare')}>Back</button>
       <button type="button" class="primary" onclick={() => setStep('capture')} disabled={!session.guide}>Continue</button>
     </div>
