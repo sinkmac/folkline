@@ -1,10 +1,15 @@
 <script lang="ts">
   import { browser } from '$app/environment';
+  import BriefingCard from '$lib/components/interview/BriefingCard.svelte';
+  import ErrorBanner from '$lib/components/interview/ErrorBanner.svelte';
+  import GuideSection from '$lib/components/interview/GuideSection.svelte';
+  import PrepareForm from '$lib/components/interview/PrepareForm.svelte';
   import ResetSessionModal from '$lib/components/interview/ResetSessionModal.svelte';
   import Stepper from '$lib/components/interview/Stepper.svelte';
   import { clearSession, loadSession, saveSession, safeStorageAvailable } from '$lib/utils/local-storage';
   import { createEmptySession, hasAnyCapturedNotes, touchSession, type InterviewSession } from '$lib/utils/session';
   import { APP_SUBHEAD, INTERVIEW_STEP_ORDER, type InterviewStep } from '$lib/utils/constants';
+  import type { InterviewInput } from '$lib/schemas/interview-input';
 
   const steps: { id: InterviewStep; label: string }[] = [
     { id: 'prepare', label: 'Prepare' },
@@ -17,18 +22,11 @@
   let hydrationComplete = $state(false);
   let storageReady = $state(false);
   let showResetModal = $state(false);
-
-  const setStep = (step: InterviewStep) => {
-    const currentIndex = INTERVIEW_STEP_ORDER.indexOf(session.currentStep);
-    const nextIndex = INTERVIEW_STEP_ORDER.indexOf(step);
-
-    if (nextIndex > currentIndex + 1) {
-      return;
-    }
-
-    session = touchSession({ ...session, currentStep: step });
-    persistSession();
-  };
+  let showRegenerateWarning = $state(false);
+  let pendingMetadata = $state<InterviewInput | null>(null);
+  let loadingGuide = $state(false);
+  let generateError = $state('');
+  let generationMeta = $state<{ repaired: boolean } | null>(null);
 
   const persistSession = () => {
     if (!browser || !hydrationComplete) {
@@ -38,11 +36,86 @@
     saveSession(session);
   };
 
+  const setStep = (step: InterviewStep) => {
+    const currentIndex = INTERVIEW_STEP_ORDER.indexOf(session.currentStep);
+    const nextIndex = INTERVIEW_STEP_ORDER.indexOf(step);
+
+    if (nextIndex > currentIndex + 1 && !session.guide) {
+      return;
+    }
+
+    session = touchSession({ ...session, currentStep: step });
+    persistSession();
+  };
+
   const resetSession = () => {
     clearSession();
     session = createEmptySession();
     showResetModal = false;
+    showRegenerateWarning = false;
+    pendingMetadata = null;
+    generateError = '';
+    generationMeta = null;
     persistSession();
+  };
+
+  const runGeneration = async (metadata: InterviewInput) => {
+    loadingGuide = true;
+    generateError = '';
+
+    try {
+      const response = await fetch('/api/generate-questions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(metadata)
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok || !payload.guide) {
+        throw new Error(payload?.error?.message || 'Question generation failed.');
+      }
+
+      session = touchSession({
+        ...session,
+        metadata,
+        guide: payload.guide,
+        currentStep: 'conduct',
+        capture: {
+          notesByQuestionId: {},
+          freeNotes: '',
+          lastSavedAt: undefined
+        }
+      });
+      generationMeta = { repaired: Boolean(payload.repaired) };
+      pendingMetadata = null;
+      showRegenerateWarning = false;
+      persistSession();
+    } catch (error) {
+      generateError = error instanceof Error ? error.message : 'Question generation failed.';
+    } finally {
+      loadingGuide = false;
+    }
+  };
+
+  const submitPrepare = async (metadata: InterviewInput) => {
+    pendingMetadata = metadata;
+
+    if (session.guide && hasAnyCapturedNotes(session)) {
+      showRegenerateWarning = true;
+      return;
+    }
+
+    await runGeneration(metadata);
+  };
+
+  const confirmRegenerate = async () => {
+    if (!pendingMetadata) {
+      showRegenerateWarning = false;
+      return;
+    }
+
+    await runGeneration(pendingMetadata);
   };
 
   if (browser) {
@@ -75,41 +148,38 @@
   </section>
 {/if}
 
+{#if generateError}
+  <ErrorBanner message={generateError} />
+{/if}
+
 <section class="wizard-card">
   {#if session.currentStep === 'prepare'}
     <h2>Prepare</h2>
-    <p>Phase 1 shell is ready. The question generator is the next phase.</p>
-    <div class="placeholder-grid">
-      <div>
-        <strong>Will collect</strong>
-        <ul>
-          <li>Who you are interviewing</li>
-          <li>Origin and era</li>
-          <li>Known context</li>
-          <li>Themes you want to explore</li>
-        </ul>
-      </div>
-      <div>
-        <strong>Session status</strong>
-        <ul>
-          <li>Guide generated: No</li>
-          <li>Notes captured: {hasAnyCapturedNotes(session) ? 'Yes' : 'No'}</li>
-          <li>Saved locally: {storageReady ? 'Yes' : 'No'}</li>
-        </ul>
-      </div>
-    </div>
-    <button type="button" class="primary" onclick={() => setStep('conduct')}>Preview next step shell</button>
+    <p>Tell Folkline who you are interviewing and what kind of memories you want help unlocking.</p>
+    <PrepareForm
+      metadata={session.metadata}
+      loading={loadingGuide}
+      canRegenerate={Boolean(session.guide)}
+      onSubmit={submitPrepare}
+    />
   {:else if session.currentStep === 'conduct'}
     <h2>Conduct</h2>
-    <p>This view will become the large-type interview guide. In Phase 1 it defines the screen and print-safe shell.</p>
-    <div class="paper-shell">
-      <p class="print-only">Folkline interview guide</p>
-      <p><strong>Briefing note placeholder:</strong> Open gently, let silence sit, and leave room for objects, places, and names.</p>
-      <p><strong>Guide placeholder:</strong> Questions and follow-up prompts will render here in Phase 2.</p>
-    </div>
+    {#if session.guide}
+      {#if generationMeta?.repaired}
+        <p class="status-note">This guide passed through one repair check before it was accepted.</p>
+      {/if}
+      <BriefingCard guide={session.guide} />
+      <div class="guide-stack">
+        {#each session.guide.sections as section}
+          <GuideSection {section} />
+        {/each}
+      </div>
+    {:else}
+      <p>No guide generated yet. Go back and prepare the interview first.</p>
+    {/if}
     <div class="actions">
       <button type="button" class="secondary" onclick={() => setStep('prepare')}>Back</button>
-      <button type="button" class="primary" onclick={() => setStep('capture')}>Continue</button>
+      <button type="button" class="primary" onclick={() => setStep('capture')} disabled={!session.guide}>Continue</button>
     </div>
   {:else if session.currentStep === 'capture'}
     <h2>Capture</h2>
@@ -125,7 +195,7 @@
     </div>
   {:else}
     <h2>Receive</h2>
-    <p>The final summary and send-to-self delivery are held for later phases. Phase 1 only establishes the completion surface.</p>
+    <p>The final summary and send-to-self delivery are held for later phases. Phase 2 keeps the completion surface intact.</p>
     <div class="paper-shell">
       <p><strong>Output law:</strong> readable document, not raw dump</p>
       <p><strong>PDF law:</strong> print-to-PDF first, attachment only when proven</p>
@@ -137,6 +207,19 @@
     </div>
   {/if}
 </section>
+
+{#if showRegenerateWarning}
+  <div class="backdrop" role="presentation">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="regenerate-title">
+      <h2 id="regenerate-title">Replace this question set?</h2>
+      <p>If you generate a new guide now, any notes tied to the current question set will be cleared.</p>
+      <div class="actions">
+        <button type="button" class="secondary" onclick={() => (showRegenerateWarning = false)}>Keep current guide</button>
+        <button type="button" class="primary" onclick={confirmRegenerate} disabled={loadingGuide}>Replace guide</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <ResetSessionModal
   open={showResetModal}
@@ -195,30 +278,27 @@
   }
 
   .wizard-card > p,
-  .notice > p {
+  .notice > p,
+  .status-note {
     color: #475569;
     line-height: 1.6;
   }
 
-  .placeholder-grid {
-    display: grid;
-    gap: 1rem;
-    margin: 1rem 0 1.5rem;
+  .status-note {
+    margin-top: 0;
   }
 
-  .placeholder-grid > div,
+  .guide-stack {
+    display: grid;
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
   .paper-shell {
     border-radius: 1rem;
     border: 1px solid rgba(15, 23, 42, 0.08);
     padding: 1rem;
     background: #fff;
-  }
-
-  .placeholder-grid ul {
-    margin: 0.65rem 0 0;
-    padding-left: 1.1rem;
-    color: #475569;
-    line-height: 1.6;
   }
 
   .paper-shell p {
@@ -262,11 +342,34 @@
     color: #fff;
   }
 
-  @media (min-width: 760px) {
-    .placeholder-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+  button:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+  }
 
+  .backdrop {
+    position: fixed;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgba(15, 23, 42, 0.45);
+  }
+
+  .modal {
+    width: min(100%, 32rem);
+    padding: 1.5rem;
+    border-radius: 1rem;
+    background: #fff;
+    box-shadow: 0 24px 80px rgba(15, 23, 42, 0.2);
+  }
+
+  .modal p {
+    color: #475569;
+    line-height: 1.55;
+  }
+
+  @media (min-width: 760px) {
     .wizard-card,
     .notice {
       padding: 1.5rem;
@@ -277,7 +380,8 @@
     .intro .eyebrow,
     .actions,
     .notice,
-    button {
+    button,
+    .backdrop {
       display: none;
     }
 
