@@ -5,6 +5,7 @@
   import CaptureQuestionField from '$lib/components/interview/CaptureQuestionField.svelte';
   import ErrorBanner from '$lib/components/interview/ErrorBanner.svelte';
   import PrepareForm from '$lib/components/interview/PrepareForm.svelte';
+  import ReceiveSummary from '$lib/components/interview/ReceiveSummary.svelte';
   import ResetSessionModal from '$lib/components/interview/ResetSessionModal.svelte';
   import SaveStatus from '$lib/components/interview/SaveStatus.svelte';
   import Stepper from '$lib/components/interview/Stepper.svelte';
@@ -17,6 +18,7 @@
     touchSession,
     type InterviewSession
   } from '$lib/utils/session';
+  import { buildSummaryDocument } from '$lib/utils/summary-builder';
   import { APP_SUBHEAD, INTERVIEW_STEP_ORDER, type InterviewStep } from '$lib/utils/constants';
   import type { InterviewInput } from '$lib/schemas/interview-input';
 
@@ -37,6 +39,8 @@
   let generateError = $state('');
   let generationMeta = $state<{ repaired: boolean } | null>(null);
   let autosaveTimer = $state<ReturnType<typeof setTimeout> | null>(null);
+  const summary = $derived(buildSummaryDocument(session));
+  const summaryHasContent = $derived(summary.sections.length > 0 || Boolean(summary.freeNotes?.trim()));
 
   const persistSession = () => {
     if (!browser || !hydrationComplete) {
@@ -283,14 +287,8 @@
       <button type="button" class="primary" onclick={() => setStep('receive')} disabled={!session.guide}>Continue</button>
     </div>
   {:else}
-    <h2>Receive</h2>
-    <p>The final summary and send-to-self delivery are held for later phases. Phase 2 keeps the completion surface intact.</p>
-    <div class="paper-shell">
-      <p><strong>Output law:</strong> readable document, not raw dump</p>
-      <p><strong>PDF law:</strong> print-to-PDF first, attachment only when proven</p>
-      <p><strong>Email law:</strong> optional one-shot convenience, not completion gate</p>
-    </div>
-    <div class="actions">
+    <ReceiveSummary summary={summary} hasContent={summaryHasContent} />
+    <div class="actions no-print">
       <button type="button" class="secondary" onclick={() => setStep('capture')}>Back</button>
       <button type="button" class="danger" onclick={() => (showResetModal = true)}>Reset session</button>
     </div>
