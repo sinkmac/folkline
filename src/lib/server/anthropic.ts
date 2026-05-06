@@ -19,7 +19,7 @@ const PROMPT_PATH = resolve(
 
 const loadSystemPrompt = () => readFileSync(PROMPT_PATH, 'utf8');
 
-const MODEL = 'claude-sonnet-4-20250514';
+const MODEL = 'claude-haiku-4-5-20251001';
 
 const userPrompt = (input: InterviewInput) => `Create a personalised interview guide for this user input.
 
@@ -136,7 +136,13 @@ export const validateGuideBusinessRules = (guide: InterviewGuide): string[] => {
 
 const parseGuide = (rawText: string): { guide: InterviewGuide | null; issues: string[] } => {
   try {
-    const parsed = JSON.parse(rawText);
+    const normalized = rawText
+      .trim()
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/```$/i, '')
+      .trim();
+    const parsed = JSON.parse(normalized);
     const guide = interviewGuideSchema.parse(parsed);
     const issues = validateGuideBusinessRules(guide);
     return { guide: issues.length ? null : guide, issues };
