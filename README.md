@@ -1,42 +1,35 @@
-# sv
+# Folkline
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+Folkline is a practical interview kit for families who want to ask better questions and keep what they hear.
 
-## Creating a project
+Current status
+- Phase 1: shell and session model complete
+- Phase 2: constrained AI question generation complete
+- Phase 3: conduct view and print artifact complete
+- Phase 4: capture flow with autosave complete
+- Phase 5: deterministic receive summary complete
+- Phase 6: transactional email delivery complete
+- Phase 7: analytics hook, deploy docs, and hardening complete
 
-If you're seeing this, you've probably already done this step. Congrats!
+Local run
+1. Copy `.env.example` to `.env`
+2. Fill the required keys
+3. Run `npm install`
+4. Run `npm run dev`
 
-```sh
-# create a new project
-npx sv create my-app
-```
+Required env
+- ANTHROPIC_API_KEY
+- RESEND_API_KEY
+- RESEND_FROM_EMAIL
 
-To recreate this project with the same configuration:
+Optional env
+- PUBLIC_PLAUSIBLE_DOMAIN
+- PUBLIC_PLAUSIBLE_SRC
 
-```sh
-# recreate this project
-npx sv@0.15.2 create --template minimal --types ts --install npm folkline
-```
-
-## Developing
-
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
-
-```sh
-npm run dev
-
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
-
-## Building
-
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+Core product laws
+- no accounts
+- no server-side note storage
+- localStorage session persistence only
+- deterministic summary in V1
+- browser print-to-PDF baseline
+- one-shot transactional email only
